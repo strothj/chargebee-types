@@ -46,7 +46,7 @@ async function getApiPage(name: string): Promise<ApiPage> {
     contents = await response.text();
     await fs.writeFile(filePath, contents, "utf8");
   } else {
-    console.log("Retrieving resource from local cache:", resourceTitle);
+    // console.log("Retrieving resource from local cache:", resourceTitle);
     contents = await fs.readFile(filePath, "utf8");
   }
 
@@ -55,7 +55,7 @@ async function getApiPage(name: string): Promise<ApiPage> {
     tree = parseAst(contents);
     await fs.writeFile(astFilePath, JSON.stringify(tree, null, 2), "utf8");
   } else {
-    console.log("Reading ast from cache:", resourceTitle);
+    // console.log("Reading ast from cache:", resourceTitle);
     tree = JSON.parse(await fs.readFile(astFilePath, "utf8"));
   }
 

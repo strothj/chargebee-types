@@ -51,7 +51,7 @@ function snakeCaseToPascalCase(snakeCase: string): string {
 }
 // #endregion
 
-function generateInterfaceProperty(
+function generateInterfacePropertySignature(
   propertyElement: Element,
 ): ts.PropertySignature {
   // If the "cb-list-action" class is missing from the property element it means
@@ -138,11 +138,18 @@ function generateInterfaceProperty(
     const interfaceNameDefinition = definitions.filter(
       (definition) => definition !== "optional",
     )[0];
-    const interfaceName = /^list of /.test(interfaceNameDefinition)
+    let interfaceName = /^list of /.test(interfaceNameDefinition)
       ? `${snakeCaseToPascalCase(
           interfaceNameDefinition.replace(/^list of /, ""),
         )}[]`
       : snakeCaseToPascalCase(interfaceNameDefinition);
+    // Special case because the documentation has a typo/inconsistency.
+    if (interfaceName === "UnbilledCharge[]") {
+      console.warn(
+        "Overriding type reference of UnbilledCharge[] to UnbilledChargeEstimate[]",
+      );
+      interfaceName = "UnbilledChargeEstimate[]";
+    }
 
     type = ts.createTypeReferenceNode(
       ts.createIdentifier(interfaceName),
@@ -166,9 +173,62 @@ function generateInterfaceProperties(
 ): ts.PropertySignature[] {
   const propertySignatures: ts.PropertySignature[] = propertyListElement.children
     .filter((childNode): childNode is Element => childNode.type === "element")
-    .map((childElement) => generateInterfaceProperty(childElement));
+    .map((childElement) => generateInterfacePropertySignature(childElement));
 
   return propertySignatures;
+}
+
+function generateModuleInterfaces(
+  modulePageTree: Root,
+): ts.InterfaceDeclaration[] {
+  const interfaceDeclarations: ts.InterfaceDeclaration[] = [];
+
+  visit<Element>(modulePageTree, "element", (element, index, parent) => {
+    const parentElement = parent as Element;
+    if (
+      element.tagName !== "div" ||
+      !element.properties?.className?.includes("page-header")
+    ) {
+      return;
+    }
+    const headingElement = element.children.find(
+      (child): child is Element => child.tagName === "h4",
+    );
+    if (!headingElement) {
+      return;
+    }
+    const id: string = headingElement.properties?.id || "";
+    if (!/_attributes$/.test(id)) {
+      return;
+    }
+    const interfaceName = snakeCaseToPascalCase(id.replace("_attributes", ""));
+    const propertyElements: Element[] = [];
+    for (let i = index + 1; i < parentElement.children.length; i += 1) {
+      const propertyNode = parentElement.children[i];
+      if (propertyNode.type !== "element") {
+        continue;
+      }
+      if (!propertyNode.properties?.className?.includes("cb-list")) {
+        break;
+      }
+      propertyElements.push(propertyNode);
+    }
+
+    interfaceDeclarations.push(
+      ts.createInterfaceDeclaration(
+        undefined,
+        undefined,
+        ts.createIdentifier(interfaceName),
+        undefined,
+        undefined,
+        propertyElements.map((propertyElement) =>
+          generateInterfacePropertySignature(propertyElement),
+        ),
+      ),
+    );
+  });
+
+  return interfaceDeclarations;
 }
 
 function generateModel(
@@ -263,6 +323,7 @@ function generateModule(
     // namespace _subscriptions { ... }
     namespaceStatement: createModuleDeclaration(`_${namespaceName}`, [
       generateModel(modulePageTree, namespaceName),
+      ...generateModuleInterfaces(modulePageTree),
     ]),
   };
 }
