@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "author": "strothj <jason@jasons.io>",
-  "license": "LicenseRef-LICENSE.md",
+  "license": "SEE LICENSE IN README.md",
   "files": [
     "LICENSE.md",
-    "./dist/index.d.ts"
+    "dist/index.d.ts"
   ],
   "types": "./dist/index.d.ts",
   "scripts": {
