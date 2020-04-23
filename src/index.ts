@@ -194,10 +194,18 @@ function generateInterfacePropertySignature(
     } else if (definitions.includes("jsonobject")) {
       type = ts.createKeywordTypeNode(ts.SyntaxKind.ObjectKeyword);
     } else if (definitions.includes("jsonarray")) {
-      // TODO: Add parsing for this.
-      type = ts.createArrayTypeNode(
-        ts.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
-      );
+      if (propertyName === "notes") {
+        console.warn("Assuming array of strings for field:", propertyName);
+        type = ts.createArrayTypeNode(
+          ts.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        );
+      } else if (propertyName === "exemption_details") {
+        type = ts.createArrayTypeNode(
+          ts.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+        );
+      } else {
+        throw new Error(`Unknown array type for field: ${propertyName}`);
+      }
     } else if (definitions.includes("enumerated string")) {
       const enumValues: string[] = [];
       visit<Element>(propertyDescriptionElement, "element", (element) => {
