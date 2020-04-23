@@ -57,9 +57,9 @@ function generateInterfacePropertySignature(
   // If the "cb-list-action" class is missing from the property element it means
   // that the property references a defined interface. The resolution logic for
   // the property name and type must be adjusted accordingly.
-  const isInterfaceReference = !propertyElement.properties?.className.includes(
-    "cb-list-action",
-  );
+  const isInterfaceReference =
+    !propertyElement.properties?.className.includes("cb-list-action") &&
+    !propertyElement.properties?.className.includes("cb-sublist-action");
 
   const propertyItemElement = propertyElement.children.find(
     (child): child is Element =>
@@ -133,6 +133,12 @@ function generateInterfacePropertySignature(
     .map((segment) => segment.trim());
   const isOptional = definitions.includes("optional");
 
+  const typePropertiesElement = propertyElement.children.find(
+    (child): child is Element =>
+      child.type === "element" &&
+      child.properties?.className?.includes("cb-list-group-in"),
+  );
+
   let type: ts.TypeNode;
   if (isInterfaceReference) {
     const interfaceNameDefinition = definitions.filter(
@@ -156,19 +162,42 @@ function generateInterfacePropertySignature(
       undefined,
     );
   } else {
-    if (definitions.includes("string")) {
+    if (typePropertiesElement) {
+      type = ts.createTypeLiteralNode(
+        typePropertiesElement.children
+          .filter(
+            (child): child is Element =>
+              child.type === "element" &&
+              child.properties?.className?.includes("cb-sublist-action"),
+          )
+          .map((subPropertyElement) =>
+            generateInterfacePropertySignature(subPropertyElement),
+          ),
+      );
+    } else if (definitions.includes("string")) {
       type = ts.createKeywordTypeNode(ts.SyntaxKind.StringKeyword);
+    } else if (definitions.includes("list of string")) {
+      type = ts.createArrayTypeNode(
+        ts.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+      );
     } else if (
       definitions.includes("integer") ||
       definitions.includes("in cents") ||
       definitions.includes("timestamp(UTC) in seconds") ||
-      definitions.includes("bigdecimal") // TODO: Verify this type.
+      definitions.includes("bigdecimal") || // TODO: Verify this type.
+      definitions.includes("long") ||
+      definitions.includes("double")
     ) {
       type = ts.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword);
     } else if (definitions.includes("boolean")) {
       type = ts.createKeywordTypeNode(ts.SyntaxKind.BooleanKeyword);
     } else if (definitions.includes("jsonobject")) {
       type = ts.createKeywordTypeNode(ts.SyntaxKind.ObjectKeyword);
+    } else if (definitions.includes("jsonarray")) {
+      // TODO: Add parsing for this.
+      type = ts.createArrayTypeNode(
+        ts.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+      );
     } else if (definitions.includes("enumerated string")) {
       const enumValues: string[] = [];
       visit<Element>(propertyDescriptionElement, "element", (element) => {
