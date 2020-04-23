@@ -257,6 +257,7 @@ function generateInterfaceProperties(
   return propertySignatures;
 }
 
+// #region Root Module Generators
 function generateModuleInterfaces(
   modulePageTree: Root,
 ): ts.InterfaceDeclaration[] {
@@ -350,6 +351,7 @@ function generateModel(
     generateInterfaceProperties(propertyListElement),
   );
 }
+// #endregion
 
 function generateModule(
   modulePageTree: Root,
