@@ -40,28 +40,175 @@ function createModuleDeclaration(
     ts.NodeFlags.Namespace,
   );
 }
+
+function snakeCaseToPascalCase(snakeCase: string): string {
+  return snakeCase
+    .split("_")
+    .map((segment) =>
+      segment.slice(0, 1).toUpperCase().concat(segment.slice(1)),
+    )
+    .join("");
+}
 // #endregion
+
+function generateInterfaceProperty(
+  propertyElement: Element,
+): ts.PropertySignature {
+  // If the "cb-list-action" class is missing from the property element it means
+  // that the property references a defined interface. The resolution logic for
+  // the property name and type must be adjusted accordingly.
+  const isInterfaceReference = !propertyElement.properties?.className.includes(
+    "cb-list-action",
+  );
+
+  const propertyItemElement = propertyElement.children.find(
+    (child): child is Element =>
+      child.type === "element" &&
+      child.properties?.className.includes("cb-list-item"),
+  );
+  if (!propertyItemElement) {
+    throw new Error("Unable to locate property item element.");
+  }
+  let propertyName: string | null = null;
+
+  if (!isInterfaceReference) {
+    visit<Text>(propertyItemElement, "text", (text, _, textParent) => {
+      const textParentElement = textParent as Element;
+      if (
+        textParentElement.type !== "element" ||
+        textParentElement.tagName !== "samp"
+      ) {
+        return;
+      }
+      propertyName = text.value;
+    });
+  } else {
+    // Since the property is a reference to a defined interface, it's property
+    // name is wrapped in a link.
+    visit<Element>(propertyItemElement, "element", (element) => {
+      if (element.tagName !== "a" || !element.properties?.href) {
+        return;
+      }
+      const text = element.children.find(
+        (child): child is Text => child.type === "text",
+      );
+      if (!text) {
+        throw new Error(
+          "Failed to retrieve interface reference property name.",
+        );
+      }
+      propertyName = text.value;
+    });
+  }
+
+  if (!propertyName) {
+    throw new Error("Unable to locate property name.");
+  }
+
+  const propertyDescriptionElement = propertyElement.children.find(
+    (child): child is Element =>
+      child.type === "element" &&
+      child.properties?.className.includes("cb-list-desc"),
+  );
+  if (!propertyDescriptionElement) {
+    throw new Error("Unable to locate property description element.");
+  }
+  const definitionElement = propertyDescriptionElement.children.find(
+    (child): child is Element =>
+      child.type === "element" &&
+      child.tagName === "dfn" &&
+      child.properties?.className.includes("text-muted"),
+  );
+  if (!definitionElement) {
+    throw new Error("Could not locate property definition element.");
+  }
+  const definitionText = definitionElement.children.find(
+    (child): child is Text => child.type === "text",
+  );
+  if (!definitionText) {
+    throw new Error("Unable to locate definition text.");
+  }
+  const definitions = definitionText.value
+    .split(", ")
+    .map((segment) => segment.trim());
+  const isOptional = definitions.includes("optional");
+
+  let type: ts.TypeNode;
+  if (isInterfaceReference) {
+    const interfaceNameDefinition = definitions.filter(
+      (definition) => definition !== "optional",
+    )[0];
+    const interfaceName = /^list of /.test(interfaceNameDefinition)
+      ? `${snakeCaseToPascalCase(
+          interfaceNameDefinition.replace(/^list of /, ""),
+        )}[]`
+      : snakeCaseToPascalCase(interfaceNameDefinition);
+
+    type = ts.createTypeReferenceNode(
+      ts.createIdentifier(interfaceName),
+      undefined,
+    );
+  } else {
+    type = ts.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+  }
+
+  return ts.createPropertySignature(
+    undefined,
+    ts.createIdentifier(propertyName),
+    isOptional ? ts.createToken(ts.SyntaxKind.QuestionToken) : undefined,
+    type,
+    undefined,
+  );
+}
+
+function generateInterfaceProperties(
+  propertyListElement: Element,
+): ts.PropertySignature[] {
+  const propertySignatures: ts.PropertySignature[] = propertyListElement.children
+    .filter((childNode): childNode is Element => childNode.type === "element")
+    .map((childElement) => generateInterfaceProperty(childElement));
+
+  return propertySignatures;
+}
 
 function generateModel(
   modulePageTree: Root,
   namespaceName: string,
 ): ts.Statement {
+  const interfaceName = snakeCaseToPascalCase(namespaceName);
+  let propertyListElement: Element | null = null;
+
   visit<Comment>(modulePageTree, "comment", (comment, _, parent) => {
     if (comment.value !== "attributes") {
       return;
     }
 
     const adjacentElement = getAdjacentElement(comment, parent);
-    console.log({ namespaceName, adjacentElement: adjacentElement?.tagName });
+    if (
+      !adjacentElement ||
+      adjacentElement.tagName !== "div" ||
+      !adjacentElement.properties?.className?.includes("cb-list-group")
+    ) {
+      return;
+    }
+
+    propertyListElement = adjacentElement;
   });
 
+  if (!propertyListElement) {
+    throw new Error(
+      `Unable to retrieve property list for model: ${interfaceName}`,
+    );
+  }
+
+  // interface Subscription { ... }
   return ts.createInterfaceDeclaration(
     undefined,
     undefined,
-    ts.createIdentifier("Test"),
+    ts.createIdentifier(interfaceName),
     undefined,
     undefined,
-    [],
+    generateInterfaceProperties(propertyListElement),
   );
 }
 
