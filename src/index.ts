@@ -31,10 +31,11 @@ function getAdjacentElement(node: Node, parentNode: Node): Element | null {
 function createModuleDeclaration(
   name: string,
   statements: ts.Statement[],
+  exported = false,
 ): ts.ModuleDeclaration {
   return ts.createModuleDeclaration(
     undefined,
-    undefined,
+    exported ? [ts.createModifier(ts.SyntaxKind.ExportKeyword)] : undefined,
     ts.createIdentifier(name),
     ts.createModuleBlock(statements),
     ts.NodeFlags.Namespace,
@@ -353,6 +354,191 @@ function generateModel(
 }
 // #endregion
 
+// #region Namespace generators
+function generateErrorNamespace(): ts.Statement {
+  const errorInterfaces = [
+    {
+      interfaceName: "PaymentErrorObject",
+      type: "payment",
+      api_error_code: [
+        "payment_processing_failed",
+        "payment_method_verification_failed",
+        "payment_method_not_present",
+        "payment_gateway_currency_incompatible",
+        "payment_intent_invalid",
+        "payment_intent_invalid_amount",
+      ],
+    },
+    {
+      interfaceName: "InvalidRequestErrorObject",
+      type: "invalid_request",
+      api_error_code: [
+        "resource_not_found",
+        "resource_limit_exhausted",
+        "param_wrong_value",
+        "duplicate_entry",
+        "db_connection_failure",
+        "invalid_state_for_request",
+        "http_method_not_supported",
+        "invalid_request",
+        "resource_limit_exceeded",
+      ],
+    },
+    {
+      interfaceName: "OperationFailedErrorObject",
+      type: "operation_failed",
+      api_error_code: [
+        "internal_error",
+        "internal_temporary_error",
+        "request_blocked",
+        "api_request_limit_exceeded",
+        "site_not_ready",
+        "site_read_only_mode",
+      ],
+    },
+    {
+      interfaceName: "IOErrorErrorObject",
+      type: "io_error",
+      api_error_code: null,
+    },
+    {
+      interfaceName: "ClientErrorErrorObject",
+      type: "client_error",
+      api_error_code: null,
+    },
+    {
+      interfaceName: "MiscErrorObject",
+      type: null,
+      api_error_code: [
+        "api_authentication_failed",
+        "api_authorization_failed",
+        "site_not_found",
+        "configuration_incompatible",
+      ],
+    },
+  ];
+  const errorInterfaceDeclarations = errorInterfaces.map((errorInterface) =>
+    ts.createInterfaceDeclaration(
+      undefined,
+      undefined,
+      ts.createIdentifier(errorInterface.interfaceName),
+      undefined,
+      [
+        ts.createHeritageClause(ts.SyntaxKind.ExtendsKeyword, [
+          ts.createExpressionWithTypeArguments(
+            undefined,
+            ts.createIdentifier("ErrorObjectBase"),
+          ),
+        ]),
+      ],
+      [
+        errorInterface.type
+          ? ts.createPropertySignature(
+              undefined,
+              ts.createIdentifier("type"),
+              undefined,
+              ts.createLiteralTypeNode(
+                ts.createStringLiteral(errorInterface.type),
+              ),
+              undefined,
+            )
+          : null,
+        errorInterface.api_error_code
+          ? ts.createPropertySignature(
+              undefined,
+              ts.createIdentifier("api_error_code"),
+              undefined,
+              ts.createUnionTypeNode(
+                errorInterface.api_error_code.map((errorCode) =>
+                  ts.createLiteralTypeNode(ts.createStringLiteral(errorCode)),
+                ),
+              ),
+              undefined,
+            )
+          : null,
+      ].filter(
+        (propertySignature): propertySignature is ts.PropertySignature =>
+          !!propertySignature,
+      ),
+    ),
+  );
+
+  const errorObjectMapInterfaceDeclaration = ts.createInterfaceDeclaration(
+    undefined,
+    undefined,
+    ts.createIdentifier("ErrorObjectMap"),
+    undefined,
+    undefined,
+    errorInterfaces.map(({ interfaceName }) =>
+      ts.createPropertySignature(
+        undefined,
+        ts.createIdentifier(interfaceName),
+        undefined,
+        ts.createTypeReferenceNode(
+          ts.createIdentifier(interfaceName),
+          undefined,
+        ),
+        undefined,
+      ),
+    ),
+  );
+
+  return createModuleDeclaration(
+    "error",
+    [
+      // interface ErrorObjectBase { ... }
+      ts.createInterfaceDeclaration(
+        undefined,
+        undefined,
+        ts.createIdentifier("ErrorObjectBase"),
+        undefined,
+        undefined,
+        [
+          ts.createPropertySignature(
+            undefined,
+            ts.createIdentifier("message"),
+            undefined,
+            ts.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+            undefined,
+          ),
+          ts.createPropertySignature(
+            undefined,
+            ts.createIdentifier("param"),
+            ts.createToken(ts.SyntaxKind.QuestionToken),
+            ts.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+            undefined,
+          ),
+        ],
+      ),
+      // interface MiscErrorObject extends ErrorObjectBase { ... } ...
+      ...errorInterfaceDeclarations,
+      // interface ErrorObjectMap { ... }
+      errorObjectMapInterfaceDeclaration,
+      // type ErrorObject = ErrorObjectMap[keyof ErrorObjectMap];
+      ts.createTypeAliasDeclaration(
+        undefined,
+        undefined,
+        ts.createIdentifier("ErrorObject"),
+        undefined,
+        ts.createIndexedAccessTypeNode(
+          ts.createTypeReferenceNode(
+            ts.createIdentifier("ErrorObjectMap"),
+            undefined,
+          ),
+          ts.createTypeOperatorNode(
+            ts.SyntaxKind.KeyOfKeyword,
+            ts.createTypeReferenceNode(
+              ts.createIdentifier("ErrorObjectMap"),
+              undefined,
+            ),
+          ),
+        ),
+      ),
+    ],
+    true,
+  );
+}
+
 function generateModule(
   modulePageTree: Root,
 ): {
@@ -468,6 +654,7 @@ async function generateModules(indexPageTree: Root): Promise<ts.Statement[]> {
 
   return statements;
 }
+// #endregion
 
 async function main(): Promise<void> {
   const prettierOptions: prettier.Options = {
@@ -495,10 +682,10 @@ async function main(): Promise<void> {
       ts.createStringLiteral("chargebee"),
       ts.createModuleBlock([
         // namespace Chargebee
-        createModuleDeclaration(
-          "Chargebee",
-          await generateModules(indexPageTree),
-        ),
+        createModuleDeclaration("Chargebee", [
+          generateErrorNamespace(),
+          ...(await generateModules(indexPageTree)),
+        ]),
 
         // export = Chargebee
         ts.createExportAssignment(
