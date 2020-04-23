@@ -1,4 +1,4 @@
-import { Root, Element, Node, Text } from "hast";
+import { Root, Element, Node, Text, Comment } from "hast";
 import path from "path";
 import prettier from "prettier";
 import ts from "typescript";
@@ -11,30 +11,20 @@ const definitionPath = path.join(distPath, "index.d.ts");
 const prettierOptionsPath = path.resolve(__dirname, "../.prettierrc");
 
 // #region Utilities
-function getAdjacentElement(
-  element: Element,
-  parentNode: Node,
-): Element | null {
+function getAdjacentElement(node: Node, parentNode: Node): Element | null {
   const parentElement = parentNode as Element;
-  const indexedChildren = parentElement.children
-    .map((child, childIndex) => ({
-      element: child,
-      originalIndex: childIndex,
-    }))
-    .filter(
-      (
-        indexedChild,
-      ): indexedChild is { element: Element; originalIndex: number } =>
-        indexedChild.element.type === "element",
-    );
-  const adjustedIndex = indexedChildren.findIndex(
-    (indexedChild) => indexedChild.element === element,
-  );
-  const nextIndexedChild = indexedChildren[adjustedIndex + 1];
-  if (!nextIndexedChild) {
-    return null;
+  const nodeIndex = parentElement.children.findIndex((child) => child === node);
+  let adjacentElement: Element | null = null;
+
+  for (let i = nodeIndex + 1; i < parentElement.children.length; i += 1) {
+    const child = parentElement.children[i];
+    if (child.type !== "element") {
+      continue;
+    }
+    adjacentElement = child;
+    break;
   }
-  const adjacentElement = nextIndexedChild.element;
+
   return adjacentElement;
 }
 
@@ -51,6 +41,29 @@ function createModuleDeclaration(
   );
 }
 // #endregion
+
+function generateModel(
+  modulePageTree: Root,
+  namespaceName: string,
+): ts.Statement {
+  visit<Comment>(modulePageTree, "comment", (comment, _, parent) => {
+    if (comment.value !== "attributes") {
+      return;
+    }
+
+    const adjacentElement = getAdjacentElement(comment, parent);
+    console.log({ namespaceName, adjacentElement: adjacentElement?.tagName });
+  });
+
+  return ts.createInterfaceDeclaration(
+    undefined,
+    undefined,
+    ts.createIdentifier("Test"),
+    undefined,
+    undefined,
+    [],
+  );
+}
 
 function generateModule(
   modulePageTree: Root,
@@ -77,7 +90,6 @@ function generateModule(
     }
     visit<Text>(adjacentElement, "text", (text, _, textParent) => {
       const value = text.value;
-      console.log(value);
       const textParentElement = textParent as Element;
       if (
         !/[a-z._]/.test(value) ||
@@ -102,7 +114,9 @@ function generateModule(
     namespaceName,
     prefixedNamespaceName: `_${namespaceName}`,
     // namespace _subscriptions { ... }
-    namespaceStatement: createModuleDeclaration(`_${namespaceName}`, []),
+    namespaceStatement: createModuleDeclaration(`_${namespaceName}`, [
+      generateModel(modulePageTree, namespaceName),
+    ]),
   };
 }
 
