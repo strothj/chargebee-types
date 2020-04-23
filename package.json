@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "main": "index.js",
   "author": "strothj <jason@jasons.io>",
-  "license": "MIT",
+  "license": "LicenseRef-LICENSE.md",
+  "files": [
+    "LICENSE.md",
+    "./dist/index.d.ts"
+  ],
+  "types": "./dist/index.d.ts",
   "scripts": {
     "start": "ts-node --files src/index.ts",
     "lint": "eslint . --ext .ts",
