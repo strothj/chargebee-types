@@ -1,4 +1,4 @@
-import { Root, Element } from "hast";
+import { Root, Element, Node, Text } from "hast";
 import path from "path";
 import prettier from "prettier";
 import ts from "typescript";
@@ -10,23 +10,117 @@ const distPath = path.resolve(__dirname, "../dist");
 const definitionPath = path.join(distPath, "index.d.ts");
 const prettierOptionsPath = path.resolve(__dirname, "../.prettierrc");
 
+function getAdjacentElement(
+  element: Element,
+  parentNode: Node,
+): Element | null {
+  const parentElement = parentNode as Element;
+  const indexedChildren = parentElement.children
+    .map((child, childIndex) => ({
+      element: child,
+      originalIndex: childIndex,
+    }))
+    .filter(
+      (
+        indexedChild,
+      ): indexedChild is { element: Element; originalIndex: number } =>
+        indexedChild.element.type === "element",
+    );
+  const adjustedIndex = indexedChildren.findIndex(
+    (indexedChild) => indexedChild.element === element,
+  );
+  const nextIndexedChild = indexedChildren[adjustedIndex + 1];
+  if (!nextIndexedChild) {
+    return null;
+  }
+  const adjacentElement = nextIndexedChild.element;
+  return adjacentElement;
+}
+
+function createModuleDeclaration(
+  name: string,
+  statements: ts.Statement[],
+): ts.ModuleDeclaration {
+  return ts.createModuleDeclaration(
+    undefined,
+    undefined,
+    ts.createIdentifier(name),
+    ts.createModuleBlock(statements),
+    ts.NodeFlags.Namespace,
+  );
+}
+
+async function generateModule(
+  modulePageTree: Root,
+): Promise<{
+  namespaceName: string;
+  prefixedNamespaceName: string;
+  namespaceStatement: ts.Statement;
+}> {
+  let namespaceName: string | null = null;
+
+  visit<Element>(modulePageTree, "element", (element, _, parent) => {
+    if (
+      element.tagName !== "h4" ||
+      !element.children.find(
+        (child) => child.type === "text" && child.value === "Model Class",
+      )
+    ) {
+      return;
+    }
+
+    const adjacentElement = getAdjacentElement(element, parent);
+    if (!adjacentElement) {
+      return;
+    }
+    visit<Text>(adjacentElement, "text", (text, _, textParent) => {
+      const value = text.value;
+      console.log(value);
+      const textParentElement = textParent as Element;
+      if (
+        !/[a-z._]/.test(value) ||
+        textParentElement.tagName !== "pre" ||
+        !textParentElement.properties?.className.includes("prettyprint") ||
+        !textParentElement.properties?.className.includes("lang-js")
+      ) {
+        return;
+      }
+      const valueSegments = value.split(".");
+      namespaceName = valueSegments[valueSegments.length - 1];
+    });
+  });
+
+  if (!namespaceName) {
+    throw new Error("Unable to determine namespace name.");
+  }
+
+  // Prefixing the namespace names is required because one of the modules as a
+  // reserved keyword as a name (export).
+  return {
+    namespaceName,
+    prefixedNamespaceName: `_${namespaceName}`,
+    // namespace _subscriptions { ... }
+    namespaceStatement: createModuleDeclaration(`_${namespaceName}`, []),
+  };
+}
+
 async function generateModules(indexPageTree: Root): Promise<ts.Statement[]> {
   const statements: ts.Statement[] = [];
   const resourcePathSegments = new Set<string>();
 
-  visit<Element>(indexPageTree, "element", (node) => {
+  visit<Element>(indexPageTree, "element", (element) => {
     if (
-      node.tagName !== "a" ||
-      !node.properties ||
-      !Array.isArray(node.properties.className) ||
-      !node.properties.className.includes("list-group-item") ||
-      !node.properties.href
+      element.tagName !== "a" ||
+      !element.properties ||
+      !Array.isArray(element.properties.className) ||
+      !element.properties.className.includes("list-group-item") ||
+      !element.properties.href
     ) {
       return;
     }
 
     const regExpExecArray = /^\/docs\/api\/([a-z_]+)$/.exec(
-      node.properties.href,
+      element.properties.href,
     );
     if (!regExpExecArray) {
       return;
@@ -34,10 +128,38 @@ async function generateModules(indexPageTree: Root): Promise<ts.Statement[]> {
     resourcePathSegments.add(regExpExecArray[1]);
   });
 
+  const namespaceExportMappings: {
+    namespaceName: string;
+    prefixedNamespaceName: string;
+  }[] = [];
   for (const resourcePathSegment of resourcePathSegments.values()) {
-    const { contents } = await pageCache.getApiPage(resourcePathSegment);
-    console.log({ resourcePathSegment, contents: contents.length });
+    const { tree: modulePageTree } = await pageCache.getApiPage(
+      resourcePathSegment,
+    );
+    const {
+      namespaceName,
+      prefixedNamespaceName,
+      namespaceStatement,
+    } = await generateModule(modulePageTree);
+    statements.push(namespaceStatement);
+    namespaceExportMappings.push({ namespaceName, prefixedNamespaceName });
   }
+
+  // export { _subscriptions as subscriptions }
+  statements.push(
+    ts.createExportDeclaration(
+      undefined,
+      undefined,
+      ts.createNamedExports(
+        namespaceExportMappings.map((mapping) =>
+          ts.createExportSpecifier(
+            ts.createIdentifier(mapping.prefixedNamespaceName),
+            ts.createIdentifier(mapping.namespaceName),
+          ),
+        ),
+      ),
+    ),
+  );
 
   return statements;
 }
@@ -68,12 +190,9 @@ async function main(): Promise<void> {
       ts.createStringLiteral("chargebee"),
       ts.createModuleBlock([
         // namespace Chargebee
-        ts.createModuleDeclaration(
-          undefined,
-          undefined,
-          ts.createIdentifier("Chargebee"),
-          ts.createModuleBlock(await generateModules(indexPageTree)),
-          ts.NodeFlags.Namespace,
+        createModuleDeclaration(
+          "Chargebee",
+          await generateModules(indexPageTree),
         ),
 
         // export = Chargebee
