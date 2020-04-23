@@ -156,7 +156,49 @@ function generateInterfacePropertySignature(
       undefined,
     );
   } else {
-    type = ts.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    if (definitions.includes("string")) {
+      type = ts.createKeywordTypeNode(ts.SyntaxKind.StringKeyword);
+    } else if (
+      definitions.includes("integer") ||
+      definitions.includes("in cents") ||
+      definitions.includes("timestamp(UTC) in seconds") ||
+      definitions.includes("bigdecimal") // TODO: Verify this type.
+    ) {
+      type = ts.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword);
+    } else if (definitions.includes("boolean")) {
+      type = ts.createKeywordTypeNode(ts.SyntaxKind.BooleanKeyword);
+    } else if (definitions.includes("jsonobject")) {
+      type = ts.createKeywordTypeNode(ts.SyntaxKind.ObjectKeyword);
+    } else if (definitions.includes("enumerated string")) {
+      const enumValues: string[] = [];
+      visit<Element>(propertyDescriptionElement, "element", (element) => {
+        if (
+          element.tagName !== "samp" ||
+          !element.properties?.className?.includes("enum")
+        ) {
+          return;
+        }
+        const text = element.children.find(
+          (child): child is Text => child.type === "text",
+        );
+        if (!text) {
+          throw new Error("Unable to parse enum value.");
+        }
+        enumValues.push(text.value);
+      });
+      if (enumValues.length > 0) {
+        type = ts.createUnionTypeNode(
+          enumValues.map((enumValue) =>
+            ts.createLiteralTypeNode(ts.createStringLiteral(enumValue)),
+          ),
+        );
+      } else {
+        console.warn("Unable to parse string enum property for:", propertyName);
+        type = ts.createKeywordTypeNode(ts.SyntaxKind.StringKeyword);
+      }
+    } else {
+      type = ts.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    }
   }
 
   return ts.createPropertySignature(
