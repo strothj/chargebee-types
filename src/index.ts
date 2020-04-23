@@ -10,6 +10,7 @@ const distPath = path.resolve(__dirname, "../dist");
 const definitionPath = path.join(distPath, "index.d.ts");
 const prettierOptionsPath = path.resolve(__dirname, "../.prettierrc");
 
+// #region Utilities
 function getAdjacentElement(
   element: Element,
   parentNode: Node,
@@ -49,14 +50,15 @@ function createModuleDeclaration(
     ts.NodeFlags.Namespace,
   );
 }
+// #endregion
 
-async function generateModule(
+function generateModule(
   modulePageTree: Root,
-): Promise<{
+): {
   namespaceName: string;
   prefixedNamespaceName: string;
   namespaceStatement: ts.Statement;
-}> {
+} {
   let namespaceName: string | null = null;
 
   visit<Element>(modulePageTree, "element", (element, _, parent) => {
@@ -140,7 +142,7 @@ async function generateModules(indexPageTree: Root): Promise<ts.Statement[]> {
       namespaceName,
       prefixedNamespaceName,
       namespaceStatement,
-    } = await generateModule(modulePageTree);
+    } = generateModule(modulePageTree);
     statements.push(namespaceStatement);
     namespaceExportMappings.push({ namespaceName, prefixedNamespaceName });
   }
