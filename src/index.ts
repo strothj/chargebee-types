@@ -555,11 +555,12 @@ function generateModuleMethods(
         stringParameterMatch && stringParameterMatch[1];
       const hasObjectParameter = /{.+}/.test(methodSignature);
 
+      let listOffset: Element = methodSignatureWrapperElement;
       if (hasObjectParameter) {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         const inputParametersWrapper = getAdjacentElement(
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          getAdjacentElement(methodSignatureWrapperElement, parent)!,
+          getAdjacentElement(listOffset, parent)!,
           parent,
         )!;
         const interfacePropertySignatures = inputParametersWrapper.children
@@ -583,7 +584,34 @@ function generateModuleMethods(
             interfacePropertySignatures,
           ),
         );
+        listOffset = inputParametersWrapper;
       }
+
+      // TODO: Type return types.
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      // const returnTypeWrapper = getAdjacentElement(
+      //   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      //   getAdjacentElement(listOffset, parent)!,
+      //   parent,
+      // )!;
+      statements.push(
+        ts.createInterfaceDeclaration(
+          undefined,
+          [ts.createModifier(ts.SyntaxKind.ExportKeyword)],
+          `${snakeCaseToPascalCase(methodName)}Response`,
+          undefined,
+          undefined,
+          [],
+          // returnTypeWrapper.children
+          //   .filter(
+          //     (child): child is Element =>
+          //       child.type === "element" &&
+          //       child.properties?.className?.includes("cb-list"),
+          //   )
+          //   .map((child) => generateInterfacePropertySignature(child))
+          //   .flat(1),
+        ),
+      );
 
       console.log({
         isList,
