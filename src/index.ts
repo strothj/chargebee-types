@@ -54,7 +54,7 @@ function snakeCaseToPascalCase(snakeCase: string): string {
 
 function generateInterfacePropertySignature(
   propertyElement: Element,
-): ts.PropertySignature {
+): ts.PropertySignature[] {
   // If the "cb-list-action" class is missing from the property element it means
   // that the property references a defined interface. The resolution logic for
   // the property name and type must be adjusted accordingly.
@@ -70,12 +70,13 @@ function generateInterfacePropertySignature(
   if (!propertyItemElement) {
     throw new Error("Unable to locate property item element.");
   }
-  let propertyName: string | null = null;
+  let propertyName = null as string | null;
 
   if (!isInterfaceReference) {
     visit<Text>(propertyItemElement, "text", (text, _, textParent) => {
       const textParentElement = textParent as Element;
       if (
+        propertyName !== null ||
         textParentElement.type !== "element" ||
         textParentElement.tagName !== "samp"
       ) {
@@ -114,12 +115,23 @@ function generateInterfacePropertySignature(
   if (!propertyDescriptionElement) {
     throw new Error("Unable to locate property description element.");
   }
-  const definitionElement = propertyDescriptionElement.children.find(
-    (child): child is Element =>
-      child.type === "element" &&
-      child.tagName === "dfn" &&
-      child.properties?.className.includes("text-muted"),
-  );
+  let definitionElement = null as Element | null;
+  visit<Element>(propertyDescriptionElement, "element", (element) => {
+    if (
+      definitionElement ||
+      element.tagName !== "dfn" ||
+      !element.properties?.className?.includes("text-muted")
+    ) {
+      return;
+    }
+    definitionElement = element;
+  });
+  // const definitionElement = propertyDescriptionElement.children.find(
+  //   (child): child is Element =>
+  //     child.type === "element" &&
+  //     child.tagName === "dfn" &&
+  //     child.properties?.className?.includes("text-muted"),
+  // );
   if (!definitionElement) {
     throw new Error("Could not locate property definition element.");
   }
@@ -163,7 +175,54 @@ function generateInterfacePropertySignature(
       undefined,
     );
   } else {
-    if (typePropertiesElement) {
+    // Special case: string filter property set:
+    // TODO: Compute the valid combinations of the string filters.
+    if (
+      definitions.includes("string filter") ||
+      definitions.includes("enumerated string filter") ||
+      // The following fields are shown with their examples within the
+      // documentation property tables as using string values. This may be a
+      // mistake.
+      definitions.includes("integer filter") ||
+      definitions.includes("timestamp(UTC) in seconds filter") ||
+      definitions.includes("boolean filter") ||
+      definitions.includes("in cents filter")
+    ) {
+      propertyName = propertyName.trim().replace("[", "");
+      let operators = null as string[] | null;
+      if (propertyName === "sort_by") {
+        operators = ["asc", "desc"];
+      } else {
+        visit<Element>(
+          propertyDescriptionElement,
+          "element",
+          (element, index, parent) => {
+            if (
+              element.tagName !== "b" ||
+              element.children[0].type !== "text" ||
+              !element.children[0].value.includes("Supported operators")
+            ) {
+              return;
+            }
+            const parentElement = parent as Element;
+            const operatorsText = parentElement.children[index + 1] as Text;
+            operators = operatorsText.value.split(", ");
+          },
+        );
+      }
+      if (!operators) {
+        throw new Error("Unable to parse operators.");
+      }
+      return operators.map((operator) =>
+        ts.createPropertySignature(
+          undefined,
+          ts.createStringLiteral(`${propertyName}[${operator}]`),
+          isOptional ? ts.createToken(ts.SyntaxKind.QuestionToken) : undefined,
+          ts.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+          undefined,
+        ),
+      );
+    } else if (typePropertiesElement) {
       type = ts.createTypeLiteralNode(
         typePropertiesElement.children
           .filter(
@@ -171,8 +230,9 @@ function generateInterfacePropertySignature(
               child.type === "element" &&
               child.properties?.className?.includes("cb-sublist-action"),
           )
-          .map((subPropertyElement) =>
-            generateInterfacePropertySignature(subPropertyElement),
+          .map(
+            (subPropertyElement) =>
+              generateInterfacePropertySignature(subPropertyElement)[0],
           ),
       );
     } else if (definitions.includes("string")) {
@@ -239,13 +299,15 @@ function generateInterfacePropertySignature(
     }
   }
 
-  return ts.createPropertySignature(
-    undefined,
-    ts.createIdentifier(propertyName),
-    isOptional ? ts.createToken(ts.SyntaxKind.QuestionToken) : undefined,
-    type,
-    undefined,
-  );
+  return [
+    ts.createPropertySignature(
+      undefined,
+      ts.createIdentifier(propertyName),
+      isOptional ? ts.createToken(ts.SyntaxKind.QuestionToken) : undefined,
+      type,
+      undefined,
+    ),
+  ];
 }
 
 function generateInterfaceProperties(
@@ -253,7 +315,8 @@ function generateInterfaceProperties(
 ): ts.PropertySignature[] {
   const propertySignatures: ts.PropertySignature[] = propertyListElement.children
     .filter((childNode): childNode is Element => childNode.type === "element")
-    .map((childElement) => generateInterfacePropertySignature(childElement));
+    .map((childElement) => generateInterfacePropertySignature(childElement))
+    .flat(1);
 
   return propertySignatures;
 }
@@ -302,9 +365,11 @@ function generateModuleInterfaces(
         ts.createIdentifier(interfaceName),
         undefined,
         undefined,
-        propertyElements.map((propertyElement) =>
-          generateInterfacePropertySignature(propertyElement),
-        ),
+        propertyElements
+          .map((propertyElement) =>
+            generateInterfacePropertySignature(propertyElement),
+          )
+          .flat(1),
       ),
     );
   });
@@ -322,11 +387,7 @@ function generateModuleMethods(
   visit<Element>(
     modulePageTree,
     "element",
-    (
-      sampleResultHeadingElement,
-      _sampleResultHeadingElementIndex,
-      sampleResultHeadingElementParent,
-    ) => {
+    (sampleResultHeadingElement, _, parent) => {
       if (sampleResultHeadingElement.tagName !== "h4") {
         return;
       }
@@ -344,7 +405,7 @@ function generateModuleMethods(
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const sampleResultCodeWrapperElement = getAdjacentElement(
         sampleResultHeadingElement,
-        sampleResultHeadingElementParent,
+        parent,
       )!;
       let sampleResultCodeElement = null as Element | null;
       visit<Element>(sampleResultCodeWrapperElement, "element", (element) => {
@@ -374,11 +435,8 @@ function generateModuleMethods(
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const methodSignatureWrapperElement = getAdjacentElement(
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        getAdjacentElement(
-          sampleResultCodeWrapperElement,
-          sampleResultHeadingElementParent,
-        )!,
-        sampleResultHeadingElementParent,
+        getAdjacentElement(sampleResultCodeWrapperElement, parent)!,
+        parent,
       )!;
       if (
         !methodSignatureWrapperElement.properties?.className?.includes(
@@ -413,6 +471,37 @@ function generateModuleMethods(
       const stringParameterName =
         stringParameterMatch && stringParameterMatch[1];
       const hasObjectParameter = /{.+}/.test(methodSignature);
+
+      if (hasObjectParameter) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const inputParametersWrapper = getAdjacentElement(
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          getAdjacentElement(methodSignatureWrapperElement, parent)!,
+          parent,
+        )!;
+        const interfacePropertySignatures = inputParametersWrapper.children
+          .filter(
+            (child): child is Element =>
+              child.type === "element" &&
+              child.properties?.className?.includes("cb-list-action"),
+          )
+          .map((propertyElement) => {
+            const ps = generateInterfacePropertySignature(propertyElement);
+            console.log({ ps });
+            return ps;
+          })
+          .flat(1);
+        statements.push(
+          ts.createInterfaceDeclaration(
+            undefined,
+            [ts.createModifier(ts.SyntaxKind.ExportKeyword)],
+            `${snakeCaseToPascalCase(methodName)}Parameters`,
+            undefined,
+            undefined,
+            interfacePropertySignatures,
+          ),
+        );
+      }
 
       console.log({
         isList,
