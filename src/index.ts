@@ -312,6 +312,184 @@ function generateModuleInterfaces(
   return interfaceDeclarations;
 }
 
+function generateModuleMethods(
+  modulePageTree: Root,
+  namespaceName: string,
+): ts.Statement[] {
+  const statements: ts.Statement[] = [];
+  console.log("## generateModuleMethods:", namespaceName);
+
+  visit<Element>(
+    modulePageTree,
+    "element",
+    (
+      sampleResultHeadingElement,
+      _sampleResultHeadingElementIndex,
+      sampleResultHeadingElementParent,
+    ) => {
+      if (sampleResultHeadingElement.tagName !== "h4") {
+        return;
+      }
+
+      const sampleResultHeadingText = sampleResultHeadingElement.children.find(
+        (child) =>
+          child.type === "text" && child.value.trim() === "Sample Result",
+      );
+      if (!sampleResultHeadingText) {
+        return;
+      }
+
+      // Determine whether or not the method returns a list of results by
+      // parsing the sample text.
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const sampleResultCodeWrapperElement = getAdjacentElement(
+        sampleResultHeadingElement,
+        sampleResultHeadingElementParent,
+      )!;
+      let sampleResultCodeElement = null as Element | null;
+      visit<Element>(sampleResultCodeWrapperElement, "element", (element) => {
+        if (
+          sampleResultCodeElement !== null ||
+          (element.tagName !== "pre" && element.tagName !== "code") ||
+          !element.properties?.className?.includes("prettyprint")
+        ) {
+          return;
+        }
+        sampleResultCodeElement = element;
+      });
+      if (!sampleResultCodeElement) {
+        throw new Error(
+          `Failed to retrieve sample code element for ${namespaceName} method.`,
+        );
+      }
+      const sampleResultCodeText = sampleResultCodeElement.children.find(
+        (child): child is Text => child.type === "text",
+      );
+      if (!sampleResultCodeText) {
+        throw new Error("Unable to retrieve sample code text.");
+      }
+      const sampleResultCode = sampleResultCodeText.value.replace(/\s/g, "");
+      const isList = /^{"list":\[{/.test(sampleResultCode);
+
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const methodSignatureWrapperElement = getAdjacentElement(
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        getAdjacentElement(
+          sampleResultCodeWrapperElement,
+          sampleResultHeadingElementParent,
+        )!,
+        sampleResultHeadingElementParent,
+      )!;
+      if (
+        !methodSignatureWrapperElement.properties?.className?.includes(
+          "cb-code-io",
+        )
+      ) {
+        throw new Error();
+      }
+      const methodSignatureElement = methodSignatureWrapperElement.children.find(
+        (child): child is Element =>
+          child.type === "element" &&
+          child.properties?.className?.includes("prettyprint"),
+      );
+      if (!methodSignatureElement) {
+        throw new Error("Unable to retrieve method signature element.");
+      }
+      const methodSignatureText = methodSignatureElement.children.find(
+        (child): child is Text => child.type === "text",
+      );
+      if (!methodSignatureText) {
+        throw new Error("Unable to retrieve method signature text.");
+      }
+      const methodSignature = methodSignatureText.value;
+      const methodNameMatch = /chargebee\.[a-z0-9_]+\.([a-z0-9_]+)\(/.exec(
+        methodSignature,
+      );
+      const methodName = methodNameMatch && methodNameMatch[1];
+      if (!methodName) {
+        throw new Error("Unable to parse method name.");
+      }
+      const stringParameterMatch = /\(<([a-z0-9_]+)>/.exec(methodSignature);
+      const stringParameterName =
+        stringParameterMatch && stringParameterMatch[1];
+      const hasObjectParameter = /{.+}/.test(methodSignature);
+
+      console.log({
+        isList,
+        methodName,
+        methodSignature,
+        stringParameterName,
+        hasObjectParameter,
+      });
+
+      statements.push(
+        // We use a s prefixed variable name with a separate export declaration
+        // because some method names use reserved words.
+        // const _create: request.RequestFactory<[CreateParameters], CreateResponse>;
+        ts.createVariableStatement(
+          undefined,
+          ts.createVariableDeclarationList(
+            [
+              ts.createVariableDeclaration(
+                ts.createIdentifier(`_${methodName}`),
+                ts.createTypeReferenceNode(
+                  ts.createQualifiedName(
+                    ts.createIdentifier("request"),
+                    ts.createIdentifier("RequestFactory"),
+                  ),
+                  [
+                    ts.createTupleTypeNode(
+                      [
+                        stringParameterName
+                          ? ts.createKeywordTypeNode(
+                              ts.SyntaxKind.StringKeyword,
+                            )
+                          : null,
+                        hasObjectParameter
+                          ? ts.createTypeReferenceNode(
+                              ts.createIdentifier(
+                                `${snakeCaseToPascalCase(
+                                  methodName,
+                                )}Parameters`,
+                              ),
+                              undefined,
+                            )
+                          : null,
+                      ].filter(
+                        (node): node is NonNullable<typeof node> => !!node,
+                      ),
+                    ),
+                    ts.createTypeReferenceNode(
+                      ts.createIdentifier(
+                        `${snakeCaseToPascalCase(methodName)}Response`,
+                      ),
+                      undefined,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            ts.NodeFlags.Const,
+          ),
+        ),
+        // export { _create as create };
+        ts.createExportDeclaration(
+          undefined,
+          undefined,
+          ts.createNamedExports([
+            ts.createExportSpecifier(
+              ts.createIdentifier(`_${methodName}`),
+              methodName,
+            ),
+          ]),
+        ),
+      );
+    },
+  );
+
+  return statements;
+}
+
 function generateModel(
   modulePageTree: Root,
   namespaceName: string,
@@ -345,7 +523,7 @@ function generateModel(
   // interface Subscription { ... }
   return ts.createInterfaceDeclaration(
     undefined,
-    undefined,
+    [ts.createModifier(ts.SyntaxKind.ExportKeyword)],
     ts.createIdentifier(interfaceName),
     undefined,
     undefined,
@@ -742,6 +920,7 @@ function generateModule(
     namespaceStatement: createModuleDeclaration(`_${namespaceName}`, [
       generateModel(modulePageTree, namespaceName),
       ...generateModuleInterfaces(modulePageTree),
+      ...generateModuleMethods(modulePageTree, namespaceName),
     ]),
   };
 }
