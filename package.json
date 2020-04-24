@@ -6,6 +6,7 @@
   "license": "SEE LICENSE IN README.md",
   "files": [
     "LICENSE.md",
+    "README.md",
     "dist/index.d.ts"
   ],
   "types": "./dist/index.d.ts",
