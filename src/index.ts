@@ -539,6 +539,157 @@ function generateErrorNamespace(): ts.Statement {
   );
 }
 
+function generateRequestNamespace(): ts.Statement {
+  return createModuleDeclaration(
+    "request",
+    [
+      // interface ResponseHandler<Response> { ... }
+      ts.createInterfaceDeclaration(
+        undefined,
+        undefined,
+        ts.createIdentifier("ResponseHandler"),
+        [ts.createTypeParameterDeclaration(ts.createIdentifier("Response"))],
+        undefined,
+        [
+          // (error: error.ErrorObject | undefined, response: Response): void;
+          ts.createCallSignature(
+            undefined,
+            [
+              ts.createParameter(
+                undefined,
+                undefined,
+                undefined,
+                ts.createIdentifier("error"),
+                undefined,
+                ts.createUnionTypeNode([
+                  ts.createTypeReferenceNode(
+                    ts.createQualifiedName(
+                      ts.createIdentifier("error"),
+                      ts.createIdentifier("ErrorObject"),
+                    ),
+                    undefined,
+                  ),
+                  ts.createKeywordTypeNode(ts.SyntaxKind.UndefinedKeyword),
+                ]),
+              ),
+              ts.createParameter(
+                undefined,
+                undefined,
+                undefined,
+                ts.createIdentifier("response"),
+                undefined,
+                ts.createTypeReferenceNode(
+                  ts.createIdentifier("Response"),
+                  undefined,
+                ),
+              ),
+            ],
+            ts.createKeywordTypeNode(ts.SyntaxKind.VoidKeyword),
+          ),
+        ],
+      ),
+      ts.createInterfaceDeclaration(
+        undefined,
+        undefined,
+        ts.createIdentifier("RequestWrapper"),
+        [
+          ts.createTypeParameterDeclaration(
+            ts.createIdentifier("Response"),
+            undefined,
+            undefined,
+          ),
+        ],
+        undefined,
+        [
+          // request(): Promise<Response>;
+          ts.createMethodSignature(
+            undefined,
+            [],
+            ts.createTypeReferenceNode(ts.createIdentifier("Promise"), [
+              ts.createTypeReferenceNode(
+                ts.createIdentifier("Response"),
+                undefined,
+              ),
+            ]),
+            ts.createIdentifier("request"),
+            undefined,
+          ),
+          // request(responseHandler: ResponseHandler<Response>): void;
+          ts.createMethodSignature(
+            undefined,
+            [
+              ts.createParameter(
+                undefined,
+                undefined,
+                undefined,
+                ts.createIdentifier("responseHandler"),
+                undefined,
+                ts.createTypeReferenceNode(
+                  ts.createIdentifier("ResponseHandler"),
+                  [
+                    ts.createTypeReferenceNode(
+                      ts.createIdentifier("Response"),
+                      undefined,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            ts.createKeywordTypeNode(ts.SyntaxKind.VoidKeyword),
+            ts.createIdentifier("request"),
+            undefined,
+          ),
+        ],
+      ),
+      // interface RequestFactory<Arguments extends any[], Response> { ... }
+      ts.createInterfaceDeclaration(
+        undefined,
+        undefined,
+        ts.createIdentifier("RequestFactory"),
+        [
+          ts.createTypeParameterDeclaration(
+            ts.createIdentifier("Arguments"),
+            ts.createArrayTypeNode(
+              ts.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
+            ),
+          ),
+          ts.createTypeParameterDeclaration(
+            ts.createIdentifier("Response"),
+            undefined,
+          ),
+        ],
+        undefined,
+        [
+          // (...args: Arguments): RequestWrapper<Response>;
+          ts.createCallSignature(
+            undefined,
+            [
+              ts.createParameter(
+                undefined,
+                undefined,
+                ts.createToken(ts.SyntaxKind.DotDotDotToken),
+                ts.createIdentifier("args"),
+                undefined,
+                ts.createTypeReferenceNode(
+                  ts.createIdentifier("Arguments"),
+                  undefined,
+                ),
+              ),
+            ],
+            ts.createTypeReferenceNode(ts.createIdentifier("RequestWrapper"), [
+              ts.createTypeReferenceNode(
+                ts.createIdentifier("Response"),
+                undefined,
+              ),
+            ]),
+          ),
+        ],
+      ),
+    ],
+    true,
+  );
+}
+
 function generateModule(
   modulePageTree: Root,
 ): {
@@ -684,6 +835,7 @@ async function main(): Promise<void> {
         // namespace Chargebee
         createModuleDeclaration("Chargebee", [
           generateErrorNamespace(),
+          generateRequestNamespace(),
           ...(await generateModules(indexPageTree)),
         ]),
 
