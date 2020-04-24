@@ -55,6 +55,89 @@ function snakeCaseToPascalCase(snakeCase: string): string {
 function generateInterfacePropertySignature(
   propertyElement: Element,
 ): ts.PropertySignature[] {
+  // Parse paramter interface sub objects.
+  if (propertyElement.properties?.className?.includes("sub-group")) {
+    let propertyName = null as string | null;
+    let isArray = null as boolean | null;
+    let propertySignatures = null as ts.PropertySignature[] | null;
+    visit<Element>(propertyElement, "element", (element) => {
+      if (element.properties?.className?.includes("cb-list-head")) {
+        const listHeadElement = element;
+        visit<Element>(listHeadElement, "element", (listHeadChildElement) => {
+          // Parse property name.
+          if (
+            propertyName === null &&
+            listHeadChildElement.properties?.className?.includes("cb-list-item")
+          ) {
+            const listItemElement = listHeadChildElement;
+            visit<Text>(
+              listItemElement,
+              "text",
+              (propertyNameText, _, propertyNameTextParent) => {
+                const propertyNameTextParentElement = propertyNameTextParent as Element;
+                if (propertyNameTextParentElement.tagName !== "strong") {
+                  return;
+                }
+                propertyName = propertyNameText.value;
+              },
+            );
+          }
+          // Parse isArray.
+          else if (
+            isArray === null &&
+            listHeadChildElement.properties?.className?.includes("cb-list-desc")
+          ) {
+            const listDescriptionElement = listHeadChildElement;
+            const listDescriptionText = listDescriptionElement.children.find(
+              (child): child is Text => child.type === "text",
+            );
+            if (!listDescriptionText) {
+              return;
+            }
+            isArray = listDescriptionText.value.includes("Array");
+          } else {
+            return;
+          }
+        });
+      } else if (
+        propertySignatures === null &&
+        element.properties?.className?.includes("collapse")
+      ) {
+        const propertyElements = element.children.filter(
+          (child): child is Element =>
+            child.type === "element" &&
+            child.properties?.className?.includes("cb-sublist-action"),
+        );
+        propertySignatures = propertyElements
+          .map((propertyElement) =>
+            generateInterfacePropertySignature(propertyElement),
+          )
+          .flat(1);
+      } else {
+        return;
+      }
+    });
+    if (propertyName === null) {
+      throw new Error(
+        `Unable to parse property name.: ${propertyElement.position?.start.line}`,
+      );
+    } else if (isArray === null) {
+      throw new Error("Unable to isArray.");
+    } else if (propertySignatures === null) {
+      throw new Error("Unable to parse property signatures.");
+    }
+    const typeLiteralNode = ts.createTypeLiteralNode(propertySignatures);
+    return [
+      ts.createPropertySignature(
+        undefined,
+        ts.createIdentifier(propertyName),
+        ts.createToken(ts.SyntaxKind.QuestionToken),
+        isArray ? ts.createArrayTypeNode(typeLiteralNode) : typeLiteralNode,
+        undefined,
+      ),
+    ];
+  }
+
   // If the "cb-list-action" class is missing from the property element it means
   // that the property references a defined interface. The resolution logic for
   // the property name and type must be adjusted accordingly.
@@ -483,13 +566,12 @@ function generateModuleMethods(
           .filter(
             (child): child is Element =>
               child.type === "element" &&
-              child.properties?.className?.includes("cb-list-action"),
+              (child.properties?.className?.includes("cb-list-action") ||
+                child.properties?.className?.includes("sub-group")),
           )
-          .map((propertyElement) => {
-            const ps = generateInterfacePropertySignature(propertyElement);
-            console.log({ ps });
-            return ps;
-          })
+          .map((propertyElement) =>
+            generateInterfacePropertySignature(propertyElement),
+          )
           .flat(1);
         statements.push(
           ts.createInterfaceDeclaration(
