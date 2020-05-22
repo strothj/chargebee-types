@@ -1,9 +1,10 @@
-import { Root } from "hast";
+import * as fs from "fs";
+import type { Root } from "hast";
 import fetch from "node-fetch";
-import path from "path";
-import parse from "rehype-parse";
-import unified from "unified";
-import { fs } from "./fs";
+import * as path from "path";
+import * as parse from "rehype-parse";
+import { Category } from "typescript-logging";
+import * as unified from "unified";
 
 type ApiPage = {
   contents: string;
@@ -20,7 +21,9 @@ function parseAst(contents: string): Root {
 }
 
 async function getApiPage(name: string): Promise<ApiPage> {
-  await fs.upsertDir(cachePath);
+  if (!fs.existsSync(cachePath)) {
+    fs.mkdirSync(cachePath);
+  }
 
   const filename = name.length > 0 ? `${name}.html` : "index.html";
   const filePath = path.join(cachePath, filename);
@@ -29,12 +32,10 @@ async function getApiPage(name: string): Promise<ApiPage> {
   const resourceTitle = name.length > 0 ? name : "index";
   let contents: string;
   let tree: Root;
+  const logger = new Category(`getApiPage(${resourceTitle})`);
 
-  if (!(await fs.exists(filePath))) {
-    console.log(
-      "Retrieving resource from documentation server:",
-      resourceTitle,
-    );
+  if (!fs.existsSync(filePath)) {
+    logger.info("Retrieving resource from documentation server.");
     const response = await fetch(
       `https://apidocs.chargebee.com/docs/api/${name}?lang=node`,
     );
@@ -44,19 +45,18 @@ async function getApiPage(name: string): Promise<ApiPage> {
       );
     }
     contents = await response.text();
-    await fs.writeFile(filePath, contents, "utf8");
+    fs.writeFileSync(filePath, contents, "utf8");
   } else {
-    // console.log("Retrieving resource from local cache:", resourceTitle);
-    contents = await fs.readFile(filePath, "utf8");
+    logger.debug("Retrieving resource from local cache.");
+    contents = fs.readFileSync(filePath, "utf8");
   }
 
-  if (!(await fs.exists(astFilePath))) {
-    console.log("Generating ast:", resourceTitle);
+  if (!fs.existsSync(astFilePath)) {
     tree = parseAst(contents);
-    await fs.writeFile(astFilePath, JSON.stringify(tree, null, 2), "utf8");
+    fs.writeFileSync(astFilePath, JSON.stringify(tree, null, 2), "utf8");
   } else {
-    // console.log("Reading ast from cache:", resourceTitle);
-    tree = JSON.parse(await fs.readFile(astFilePath, "utf8"));
+    logger.debug("Reading ast from cache.");
+    tree = JSON.parse(fs.readFileSync(astFilePath, "utf8"));
   }
 
   return { contents, tree };
