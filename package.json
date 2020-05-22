@@ -11,7 +11,7 @@
   ],
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "ts-node --files src/index.ts",
+    "build": "ts-node --files src/main.ts",
     "lint": "eslint . --ext .ts",
     "type-check": "tsc"
   },
