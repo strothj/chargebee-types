@@ -1,4 +1,5 @@
 /.cache
 /dist
+/dist.old
 /node_modules
 *.log
